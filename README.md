@@ -1,6 +1,6 @@
 # AI Governance Dashboard: APM Take-Home
 
-**Live demo:** https://YOUR-APP.onrender.com  (free tier sleeps when idle; first load can take ~1 minute)
+Live demo:(https://cloudeagle-apm-take-home-assignment.onrender.com/) (free tier sleeps when idle; first load can take ~1 minute)
 
 A single-screen dashboard that shows a CFO or IT/security lead how much the organization spends on AI tools, who is spending it, and whether usage stays inside approved limits, including tools nobody approved ("Shadow AI").
 
