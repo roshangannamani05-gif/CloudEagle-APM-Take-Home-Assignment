@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Governance Dashboard</title>
+<style>
+:root{--bg:#F6F7F9;--card:#fff;--ink:#14171F;--mute:#4A5160;--line:#E1E4EA;--track:#EEF0F4;--blue:#2457D6;--red:#B42318;--amber:#B54708;--gray:#6B7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0F1218;--card:#181C25;--ink:#EDEFF3;--mute:#A8AFBD;--line:#2A303C;--track:#252B37;--blue:#6C93FF;--red:#FF8A80;--amber:#FFB26B;--gray:#9AA1AE}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,Arial,sans-serif}
+.wrap{max-width:1440px;margin:0 auto;padding:28px 32px;display:flex;flex-direction:column;gap:20px}
+h1{margin:0;font-size:24px} h2{margin:0;font-size:16px}
+.sub{font-size:13px;color:var(--mute)}
+.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.ctl{display:flex;flex-wrap:wrap;gap:8px}
+select,button,input{font:inherit;color:var(--ink)}
+select,.btn{min-height:44px;padding:0 14px;border:1px solid var(--line);background:var(--card);border-radius:8px;cursor:pointer}
+.btn.primary{background:var(--blue);color:#fff;border:0;font-weight:600}
+@media(prefers-color-scheme:dark){.btn.primary{color:#0F1218}}
+.grid{display:grid;gap:16px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.charts{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.big{font-size:30px;font-weight:700;margin-top:4px} .big small{font-size:15px;font-weight:500;color:var(--mute)}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.track{position:relative;height:14px;background:var(--track);border-radius:4px;margin:4px 0 14px}
+.fill{height:100%;border-radius:4px}
+.tick{position:absolute;top:-3px;width:2px;height:20px;background:var(--ink)}
+.dept{cursor:pointer;border-radius:6px;padding:2px 4px;background:none;border:0;width:100%;text-align:left}
+.dept.sel{outline:2px solid var(--blue)}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
+th{text-align:left;color:var(--mute);padding:8px} td{padding:10px 8px;border-top:1px solid var(--line)}
+.sm{min-height:44px;padding:0 12px;border:1px solid var(--line);background:var(--card);border-radius:8px;cursor:pointer;font-size:13px;margin-right:6px}
+.limits{display:flex;flex-wrap:wrap;gap:12px;font-size:13px}
+.limits label{display:flex;flex-direction:column;gap:4px}
+.limits input{width:96px;min-height:44px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div>
+      <h1>AI Governance Dashboard</h1>
+      <div class="sub">Usage and spend limits across the organization. Live data from the API, day 25 of 30. Amounts in $K.</div>
+    </div>
+    <div class="ctl">
+      <label class="sub" for="deptSel" style="align-self:center">Department</label>
+      <select id="deptSel"></select>
+      <button class="btn" id="simBtn">Simulate usage</button>
+      <button class="btn" id="resetBtn">Reset demo</button>
+      <button class="btn primary" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="grid charts">
+    <section class="card"><h2>1. Spend vs limit by department</h2><div class="sub" style="margin:2px 0 14px">Tick = limit. Click a department to filter.</div><div id="c1"></div></section>
+    <section class="card"><h2>2. Monthly spend vs cap</h2><div class="sub" style="margin:2px 0 8px">Dashed = forecast to month end</div><div class="scroll"><div id="c2"></div></div><div class="sub" id="c2note"></div></section>
+    <section class="card"><h2>3. Spend by tool: approved vs shadow</h2><div class="sub" style="margin:2px 0 14px">Blue = approved, orange = shadow, gray = blocked</div><div id="c3"></div></section>
+  </div>
+
+  <section class="card">
+    <h2 style="margin-bottom:10px">Needs attention</h2>
+    <div class="scroll"><table><thead><tr><th>Severity</th><th>What happened</th><th>Action</th></tr></thead><tbody id="alerts"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-bottom:10px">Policy limits ($K per month)</h2>
+    <div class="limits" id="limits"></div>
+  </section>
+</div>
+
+<script>
+const DEPTS=['Engineering','Marketing','Sales','Support','Finance'];
+let S=null;
+const $=id=>document.getElementById(id);
+const f=n=>'$'+n.toFixed(1)+'K';
+const idx=()=>DEPTS.indexOf(S.dept);
+const tSpend=t=>S.dept==='All'?t.s.reduce((a,b)=>a+b,0):t.s[idx()];
+const dTotal=i=>S.tools.reduce((a,t)=>a+t.s[i],0);
+const total=()=>S.tools.reduce((a,t)=>a+tSpend(t),0);
+const capNow=()=>S.dept==='All'?S.cap:S.limits[S.dept];
+const forecast=()=>S.tools.reduce((a,t)=>a+(t.status==='blocked'?tSpend(t):tSpend(t)*30/S.day),0);
+const color=s=>s==='approved'?'var(--blue)':s==='shadow'?'var(--amber)':'var(--gray)';
+
+function render(){
+  const mtd=total(), fc=forecast(), cap=capNow();
+  const shadow=S.tools.filter(t=>t.status==='shadow').reduce((a,t)=>a+tSpend(t),0);
+  const shadowN=S.tools.filter(t=>t.status==='shadow').length;
+  const over=DEPTS.filter(d=>dTotal(DEPTS.indexOf(d))>S.limits[d]);
+  const near=DEPTS.filter(d=>{const r=dTotal(DEPTS.indexOf(d))/S.limits[d];return r>=.9&&r<=1});
+  const alerts=[];
+  DEPTS.forEach((d,i)=>{const t=dTotal(i),l=S.limits[d];
+    if(t>l)alerts.push({sev:'High',c:'var(--red)',msg:`${d} is ${f(t-l)} over its ${f(l)} limit`,acts:[['Raise limit 15%',()=>{S.limits[d]=Math.ceil(l*1.15*10)/10;commit()}]]});
+    else if(t/l>=.9)alerts.push({sev:'Medium',c:'var(--amber)',msg:`${d} is at ${Math.round(t/l*100)}% of its limit; forecast ${f(t*30/S.day)}`,acts:[['Raise limit 15%',()=>{S.limits[d]=Math.ceil(l*1.15*10)/10;commit()}]]});});
+  S.tools.filter(t=>t.status==='shadow').forEach(t=>{
+    alerts.push({sev:'Medium',c:'var(--amber)',msg:`${t.name} is in use but not on the approved list (${f(t.s.reduce((a,b)=>a+b,0))} spent)`,acts:[['Approve',()=>{t.status='approved';commit()}],['Block',()=>{t.status='blocked';commit()}]]});});
+  const fAll=S.tools.reduce((a,t)=>a+(t.status==='blocked'?t.s.reduce((x,y)=>x+y,0):t.s.reduce((x,y)=>x+y,0)*30/S.day),0);
+  if(fAll>S.cap)alerts.unshift({sev:'High',c:'var(--red)',msg:`Company forecast ${f(fAll)} exceeds the ${f(S.cap)} cap`,acts:[['Raise cap 10%',()=>{S.cap=Math.ceil(S.cap*1.1);commit()}]]});
+
+  $('kpis').innerHTML=`
+   <div class="card"><div class="sub">Spend this month</div><div class="big">${f(mtd)} <small>of ${f(cap)}</small></div><div class="sub">${Math.round(mtd/cap*100)}% used. Forecast ${f(fc)}.</div></div>
+   <div class="card"><div class="sub">Shadow AI spend</div><div class="big" style="color:var(--amber)">${f(shadow)} <small>${mtd?Math.round(shadow/mtd*100):0}% of total</small></div><div class="sub">${shadowN} unapproved tool${shadowN===1?'':'s'}.</div></div>
+   <div class="card"><div class="sub">Departments over limit</div><div class="big" style="color:${over.length?'var(--red)':'inherit'}">${over.length} <small>of 5</small></div><div class="sub">${near.length} more at 90%+ of limit.</div></div>
+   <div class="card"><div class="sub">Open alerts</div><div class="big">${alerts.length}</div><div class="sub">${alerts.filter(a=>a.sev==='High').length} high severity.</div></div>`;
+
+  const ratios=DEPTS.map((d,i)=>dTotal(i)/S.limits[d]); const sc=Math.max(1.2,...ratios);
+  $('c1').innerHTML=DEPTS.map((d,i)=>{const t=dTotal(i),r=ratios[i],o=r>1;
+    return `<button class="dept ${S.dept===d?'sel':''}" data-d="${d}" aria-pressed="${S.dept===d}"><div class="row"><span>${d}</span><span style="${o?'color:var(--red);font-weight:600':''}">${f(t)} / ${f(S.limits[d])} · ${Math.round(r*100)}%${o?' OVER':''}</span></div><div class="track"><div class="fill" style="width:${r/sc*100}%;background:${o?'var(--red)':'var(--blue)'}"></div><div class="tick" style="left:${100/sc}%"></div></div></button>`}).join('');
+  document.querySelectorAll('.dept').forEach(b=>b.onclick=()=>{S.dept=S.dept===b.dataset.d?'All':b.dataset.d;$('deptSel').value=S.dept;render()});
+
+  const share=S.dept==='All'?1:dTotal(idx())/S.tools.reduce((a,t)=>a+t.s.reduce((x,y)=>x+y,0),0);
+  const pts=[...S.hist.map(v=>v*share),fc]; const max=Math.max(cap,...pts)*1.15;
+  const X=i=>60+96*i, Y=v=>180-v/max*160;
+  const line=pts.slice(0,5).map((v,i)=>`${X(i)},${Y(v)}`).join(' ');
+  $('c2').innerHTML=`<svg viewBox="0 0 600 220" style="width:100%;min-width:320px" role="img" aria-label="Monthly spend versus cap">
+   <line x1="40" y1="180" x2="580" y2="180" stroke="var(--line)"/>
+   <line x1="40" y1="${Y(cap)}" x2="580" y2="${Y(cap)}" stroke="var(--red)" stroke-dasharray="6 4"/>
+   <text x="580" y="${Y(cap)-6}" text-anchor="end" font-size="12" fill="var(--red)">Cap ${f(cap)}</text>
+   <polyline points="${line}" fill="none" stroke="var(--blue)" stroke-width="3"/>
+   <polyline points="${X(4)},${Y(pts[4])} ${X(5)},${Y(pts[5])}" fill="none" stroke="var(--blue)" stroke-width="3" stroke-dasharray="6 5"/>
+   ${pts.map((v,i)=>`<circle cx="${X(i)}" cy="${Y(v)}" r="${i==5?5:4}" fill="${i==5?'var(--card)':'var(--blue)'}" stroke="var(--blue)" stroke-width="3"/><text x="${X(i)}" y="${Y(v)-10}" text-anchor="middle" font-size="12" fill="var(--ink)">${f(v)}</text><text x="${X(i)}" y="200" text-anchor="middle" font-size="12" fill="var(--mute)">${S.months[i]}</text>`).join('')}
+  </svg>`;
+  $('c2note').textContent=fc>cap?`Forecast exceeds the cap by ${f(fc-cap)}.`:`Forecast stays ${f(cap-fc)} under the cap.`;
+
+  const tm=Math.max(...S.tools.map(tSpend),0.1);
+  $('c3').innerHTML=S.tools.map(t=>`<div class="row"><span>${t.name} · <b style="color:${color(t.status)}">${t.status[0].toUpperCase()+t.status.slice(1)}</b></span><span>${f(tSpend(t))}</span></div><div class="track" style="height:12px;margin-bottom:12px"><div class="fill" style="width:${tSpend(t)/tm*100}%;background:${color(t.status)}"></div></div>`).join('');
+
+  $('alerts').innerHTML=alerts.length?'':'<tr><td colspan="3">All clear. No open alerts.</td></tr>';
+  alerts.forEach(a=>{const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:${a.c};font-weight:600">${a.sev}</td><td>${a.msg}</td><td></td>`;
+    a.acts.forEach(([l,fn])=>{const b=document.createElement('button');b.className='sm';b.textContent=l;b.onclick=fn;tr.lastChild.appendChild(b)});
+    $('alerts').appendChild(tr)});
+
+  $('limits').innerHTML=`<label>Company cap<input type="number" step="0.5" min="0" value="${S.cap}" data-k="cap"></label>`+DEPTS.map(d=>`<label>${d}<input type="number" step="0.5" min="0" value="${S.limits[d]}" data-k="${d}"></label>`).join('');
+  document.querySelectorAll('#limits input').forEach(i=>i.onchange=()=>{const v=parseFloat(i.value);if(!(v>0))return render();i.dataset.k==='cap'?S.cap=v:S.limits[i.dataset.k]=v;commit()});
+}
+
+$('deptSel').innerHTML=['All',...DEPTS].map(d=>`<option>${d}</option>`).join('');
+$('deptSel').onchange=e=>{S.dept=e.target.value;render()};
+const api=(u,m='GET',b)=>fetch(u,{method:m,headers:{'Content-Type':'application/json'},body:b&&JSON.stringify(b)});
+async function load(){const d=await(await api('/api/state')).json();S={...d,dept:S?S.dept:'All'};render()}
+async function commit(){render();await api('/api/state','PUT',{cap:S.cap,limits:S.limits,tools:S.tools})}
+$('resetBtn').onclick=async()=>{await api('/api/reset','POST');S.dept='All';$('deptSel').value='All';load()};
+$('simBtn').onclick=async()=>{await api('/api/simulate','POST');load()};
+$('exportBtn').onclick=()=>{location.href='/api/export.csv'};
+load();
+setInterval(()=>{const a=document.activeElement;if(!a||a.tagName!=='INPUT')load()},5000);
+</script>
+</body>
+</html>
